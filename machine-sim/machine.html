@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Машинно Гласуване</title>
+<style>
+  body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+      display: block; /* Changed from flex to block */
+      min-height: 100vh; /* Changed from height to min-height */
+      overflow-y: auto; /* Ensure vertical scrolling */
+  }
+  
+  #votingMachine {
+      background-color: #fff;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+      width: 600px;
+      margin: 20px auto; /* Centered horizontally, added margin for top and bottom */
+      max-width: 100%; /* Ensure it doesn't overflow on smaller screens */
+  }
+  
+  #voteStatus {
+      text-align: center;
+      margin-bottom: 20px;
+      word-wrap: break-word;
+  }
+  
+  .vote-option {
+      display: block;
+      margin: 10px 0;
+  }
+  
+  .vote-option input {
+      margin-right: 10px;
+  }
+  
+  .vote-option label {
+      font-size: 18px;
+  }
+  
+  button {
+      width: 100%;
+      padding: 10px;
+      font-size: 18px;
+      cursor: pointer;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      margin-top: 20px;
+  }
+  
+  button:hover {
+      background-color: #0056b3;
+  }
+  
+  #countdown {
+      font-weight: bold;
+      color: red;
+  }
+</style>
+</head>
+<body>
+
+<div id="votingMachine">
+  <div id="voteStatus"><b>Избори за Народно събрание</b></div>
+
+    <form id="voteForm">
+      <div id="votingArea">
+        <!-- Voting options will be loaded here as radio buttons -->
+      </div>
+        <button type="submit">Гласувай</button>
+  </form>
+</div>
+
+<script type="module">
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.6.0/firebase-app.js";
+import { getDatabase, ref, get, set, push } from "https://www.gstatic.com/firebasejs/10.6.0/firebase-database.js";
+import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/10.6.0/firebase-app-check.js";
+
+// Firebase configuration; You'll need to change this if you want to use your own firebase account.
+const firebaseConfig = {
+  apiKey: "AIzaSyBveBOfCBAagPLLKRIHh6idVTJA9TuEqa4",
+  authDomain: "truevotebg-5ecf2.firebaseapp.com",
+  databaseURL: "https://truevotebg-5ecf2-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "truevotebg-5ecf2",
+  storageBucket: "truevotebg-5ecf2.appspot.com",
+  messagingSenderId: "134987929220",
+  appId: "1:134987929220:web:c4b72d88324ecaff8494d1"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app);
+
+// Initialize Firebase App Check; You'll need to change this if you want to use your own firebase account.
+const appCheck = initializeAppCheck(app, {
+  provider: new ReCaptchaV3Provider('6LevvwopAAAAAEHNhtGdgbpSQ6YR8jwSFu2ZFFBT'),
+  isTokenAutoRefreshEnabled: true
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+  if (getCookie('voted') === 'true') {
+    document.getElementById('voteStatus').innerHTML = '<strong>Вече гласувахте</strong><br>Може да гласувате отново след 5 минути';
+    document.getElementById('voteForm').style.display = 'none';
+    return;
+  }
+
+  // Fetch parties from Firebase
+  const partiesRef = ref(database, 'parties');
+  get(partiesRef).then((snapshot) => {
+    if (snapshot.exists()) {
+      const partiesData = snapshot.val();
+      const parties = Object.values(partiesData); // Convert object to array
+      const votingArea = document.getElementById('votingArea');
+      parties.forEach(party => {
+        const radioInput = document.createElement('input');
+        radioInput.type = 'radio';
+        radioInput.id = party.name;
+        radioInput.name = 'voteOptions';
+        radioInput.value = party.name;
+
+        const label = document.createElement('label');
+        label.htmlFor = party.name;
+        label.appendChild(document.createTextNode(party.name));
+
+        const div = document.createElement('div');
+        div.className = 'vote-option';
+        div.appendChild(radioInput);
+        div.appendChild(label);
+        votingArea.appendChild(div);
+      });
+    } else {
+      console.log("No parties found");
+    }
+  }).catch((error) => {
+    console.error(error);
+  });
+
+  document.getElementById('voteForm').addEventListener('submit', function(event) {
+    event.preventDefault();
+    const selectedParty = document.querySelector('input[name="voteOptions"]:checked');
+    if (!selectedParty) {
+      alert('Направете избор преди да гласувате');
+      return;
+    }
+
+    // Submit vote to Firebase
+    const ballotsRef = ref(database, 'ballots');
+    generateBallot(selectedParty.value, '45fa35e5-a907-4c94-a683-bfa8743c6bba').then(newBallot => {
+      const newBallotRef = push(ballotsRef);
+      set(newBallotRef, newBallot).then(() => {
+        setCookie('voted', 'true', 1);
+        document.getElementById('voteForm').style.display = 'none';
+        displayPinAndCountdown(newBallot.hash);
+      });
+    });
+  });
+});
+
+async function generateBallot(party, machineId) {
+  let newId, hash;
+  do {
+    newId = String(Math.floor(Math.random() * 100000000)).padStart(8, '0');
+    hash = await sha256(party + machineId + newId);
+  } while (false); // Add your condition for duplicate check if necessary
+  return { id: newId, party: party, hash: hash, machine_id: machineId };
+}
+
+async function sha256(message) {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
+}
+
+function displayPinAndCountdown(hash) {
+  const voteStatus = document.getElementById('voteStatus');
+  voteStatus.innerHTML = `Вашият БХЕШ е: <br> <strong>${hash}</strong><br><br><a href="${window.location.origin}/machine-sim/publicRegister.html" id="exitLink">Може да проверите вашата бюлетина тук</a>`;
+}
+
+function setCookie(name, value, minutes) {
+  const d = new Date();
+  d.setTime(d.getTime() + (minutes*60*1000));
+  const expires = "expires="+ d.toUTCString();
+  document.cookie = name + "=" + value + ";" + expires + ";path=/;SameSite=Lax";
+}
+
+function getCookie(name) {
+  const cname = name + "=";
+  const decodedCookie = decodeURIComponent(document.cookie);
+  const ca = decodedCookie.split(';');
+  for(let i = 0; i <ca.length; i++) {
+    let c = ca[i];
+    while (c.charAt(0) === ' ') {
+      c = c.substring(1);
+    }
+    if (c.indexOf(cname) === 0) {
+      return c.substring(cname.length, c.length);
+    }
+  }
+  return "";
+}
+</script>
+</body>
+</html>
